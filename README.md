@@ -66,4 +66,4 @@ The tool includes functionality to visualize implied volatility as a surface:
 - strikes: List of strike prices
 - expirations: List of times to expiration
 - r: Risk-free interest rate
-2. The output is a 3D plot showing how implied volatility varies with strike price and time to expiration.
+2. The output is a plot showing how implied volatility varies with strike price and time to expiration.
