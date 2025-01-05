@@ -22,7 +22,7 @@ The Volatility Tool is a Python-based application that fetches option data for a
 1. Install Python 3.7+ from the official Python website.
 2. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/VolatilityTool.git
+git clone https://github.com/shotea/VolatilityTool
 cd VolatilityTool
 ```
 ## 3. Create a virtual environment and activate it:
