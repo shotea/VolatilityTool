@@ -1,76 +1,158 @@
 import yfinance as yf
-from modules.analyze_data import implied_volatility
-from datetime import datetime
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import norm
+from scipy.optimize import brentq
+from datetime import datetime, timedelta
 
-# Fetch options data for a given ticker symbol and expiration date
-def fetch_options_data(ticker_symbol, expiry_date=None):
-    ticker = yf.Ticker(ticker_symbol)
-    expiry_dates = ticker.options
-    print(f"Available Expiry Dates: {expiry_dates}")
+# Black-Scholes formula
+def black_scholes_call(S, K, T, r, sigma):
+    """
+    Calculate the Black-Scholes option price for a call option.
+    
+    S : float : Current stock price
+    K : float : Strike price
+    T : float : Time to expiration in years
+    r : float : Risk-free interest rate (annual)
+    sigma : float : Volatility of the stock (annual)
+    
+    Returns the option price.
+    """
+    d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
+    d2 = d1 - sigma * np.sqrt(T)
+    
+    call_price = S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
+    return call_price
 
-    # Let the user select an expiration date
-    if not expiry_date:
-        print("Select an expiration date from the list above:")
-        expiry_date = input("Enter the expiration date (e.g., 2025-01-10): ")
-        if expiry_date not in expiry_dates:
-            print("Invalid expiration date. Please restart and select a valid date.")
-            return None, None
+# Implied volatility function using Brent's method
+def implied_volatility(S, K, T, r, market_price):
+    """
+    Calculate the implied volatility using the Brent's method.
+    
+    S : float : Current stock price
+    K : float : Strike price
+    T : float : Time to expiration in years
+    r : float : Risk-free interest rate (annual)
+    market_price : float : Market price of the option
+    
+    Returns the implied volatility.
+    """
+    def objective_function(sigma):
+        return black_scholes_call(S, K, T, r, sigma) - market_price
 
-    options_data = ticker.option_chain(expiry_date)
-    return options_data.calls, options_data.puts
+    return brentq(objective_function, 1e-6, 5)
 
-def get_current_stock_price(ticker_symbol):
-    """Fetch the current stock price for a given ticker."""
-    ticker = yf.Ticker(ticker_symbol)
-    return ticker.history(period="1d")["Close"].iloc[0]
+# 3D plotting of option prices vs. strike price and time to expiration
+def plot_3d_surface(S, r, market_price, expiry_dates, strikes):
+    """
+    Plot a 3D surface for implied volatility.
+    
+    S : float : Current stock price
+    r : float : Risk-free interest rate
+    market_price : float : Market price of the option
+    expiry_dates : list : Available expiry dates
+    strikes : list : List of strike prices
+    """
+    fig = plt.figure(figsize=(10, 8))
+    ax = fig.add_subplot(111, projection='3d')
+    
+    X, Y = np.meshgrid(strikes, range(len(expiry_dates)))
+    Z = np.zeros(X.shape)
+    
+    # Store the calculated implied volatilities for printing
+    implied_vols = []
+    
+    for i, expiry in enumerate(expiry_dates):
+        # Calculate time to expiration
+        T = (np.datetime64(expiry) - np.datetime64('today')).astype('timedelta64[D]').item().days / 365
+        for j, strike in enumerate(strikes):
+            try:
+                sigma = implied_volatility(S, strike, T, r, market_price)
+                Z[i, j] = sigma
+                implied_vols.append((expiry, strike, sigma))
+            except ValueError:
+                Z[i, j] = np.nan  # If no solution, set NaN to avoid plot issues
+    
+    # Plot the 3D surface
+    ax.plot_surface(X, Y, Z, cmap='viridis', edgecolor='none')
+    ax.set_xlabel('Strike Price')
+    ax.set_ylabel('Expiration Date')
+    ax.set_zlabel('Implied Volatility')
+    ax.set_title('Implied Volatility Surface')
+    
+    # Set expiration dates as labels on the y-axis
+    ax.set_yticks(range(len(expiry_dates)))
+    ax.set_yticklabels(expiry_dates)
+    
+    # Add annotations for implied volatility values (only for a few points for clarity)
+    for i, expiry in enumerate(expiry_dates):
+        for j, strike in enumerate(strikes):
+            if not np.isnan(Z[i, j]):
+                ax.text(X[i, j], Y[i, j], Z[i, j], f'{Z[i, j]:.2f}', color='black', fontsize=8)
+
+    plt.show()
+    
+    # Print implied volatility calculations
+    print("\nImplied Volatility Calculations:")
+    for expiry, strike, sigma in implied_vols:
+        print(f"Expiration: {expiry}, Strike: {strike}, Implied Volatility: {sigma:.4f}")
+
+def get_available_expiration_dates(ticker):
+    """
+    Fetch available expiration dates for a given ticker using Yahoo Finance.
+    
+    ticker : str : Stock symbol
+    
+    Returns a list of expiration dates.
+    """
+    try:
+        # Fetch options data for the ticker
+        stock = yf.Ticker(ticker)
+        options_dates = stock.options
+        
+        # Return the list of available expiration dates
+        return options_dates
+    except Exception as e:
+        print(f"Error fetching expiration dates: {e}")
+        return []
 
 def main():
-    # Input ticker symbol and fetch current stock price
     ticker = input("Enter the ticker symbol (e.g., SPY, AAPL, TSLA): ").upper()
-    stock_price = get_current_stock_price(ticker)
-    print(f"Current Stock Price for {ticker}: {stock_price:.2f}")
-
-    # Fetch options data and allow user to select expiration date
-    calls, puts = fetch_options_data(ticker)
-
-    # Check if calls and puts data were fetched successfully
-    if calls is None or puts is None:
+    S = float(input(f"Current Stock Price for {ticker}: "))
+    
+    # Get the available expiration dates dynamically
+    expiry_dates = get_available_expiration_dates(ticker)
+    
+    if not expiry_dates:
+        print("No expiration dates found, exiting.")
         return
-
-    print("Calls Sample:")
-    print(calls.head())
-
-    # Input parameters for implied volatility calculation
+    
+    print("\nAvailable Expiration Dates:")
+    for i, expiry in enumerate(expiry_dates):
+        print(f"{i + 1}. {expiry}")
+    
+    # User selects the expiration date
     try:
-        option_price = float(input("Enter the market price of the option: "))
-        K = float(input("Enter the strike price: "))
-        r = float(input("Enter the risk-free interest rate (e.g., 0.05 for 5%): "))
-    except ValueError:
-        print("Invalid input. Please enter numeric values.")
-        return
-
-    # Calculate the time to expiration based on today's date and selected expiration date
-    try:
-        expiration_date = datetime.strptime('2025-01-10', '%Y-%m-%d')  # Use the user-selected expiration date
-        today = datetime.now()
-        if expiration_date < today:
-            print("The selected expiration date is in the past. Please select a future expiration date.")
+        selected_expiry_idx = int(input(f"Select the expiration date (1-{len(expiry_dates)}): ")) - 1
+        if selected_expiry_idx < 0 or selected_expiry_idx >= len(expiry_dates):
+            print("Invalid selection, exiting.")
             return
-        T = (expiration_date - today).days / 365.0  # Convert days to years
-        print(f"Time to expiration: {T:.3f} years")
-    except Exception as e:
-        print(f"Error calculating time to expiration: {e}")
+    except ValueError:
+        print("Invalid input, please enter a number.")
         return
 
-    # Calculate implied volatility
-    try:
-        implied_vol = implied_volatility(option_price, stock_price, K, T, r)
-        print(f"Implied Volatility: {implied_vol:.2%}")
-    except ValueError as e:
-        print(f"Error calculating implied volatility: {e}")
-        print("This might be due to unrealistic input parameters or market conditions.")
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+    selected_expiry = expiry_dates[selected_expiry_idx]
+    
+    # Get user input for option data
+    market_price = float(input("Enter the market price of the option: "))
+    strike_price = float(input("Enter the strike price: "))
+    r = float(input("Enter the risk-free interest rate (e.g., 0.05 for 5%): "))
+    
+    # Strikes (range of strike prices to choose from)
+    strikes = np.arange(75, 500, 5)
+    
+    # Plot the implied volatility surface
+    plot_3d_surface(S, r, market_price, expiry_dates, strikes)
 
 if __name__ == "__main__":
     main()
